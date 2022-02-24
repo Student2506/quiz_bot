@@ -1,2 +1,2 @@
-quizbot-tg: python3 telegram_bot.py
-quizbot-vk: python3 vkontakte_bot.py
+quizbottg: python3 telegram_bot.py
+quizbotvk: python3 vkontakte_bot.py

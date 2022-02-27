@@ -47,7 +47,6 @@ def handle_new_question_request(bot, update, redis_conn):
 def handle_solution_attempt(bot, update, redis_conn):
     logger.debug(f'answer-handler: {update.message.text}\n')
     answer = redis_conn.get(update.message.from_user['id']).decode()
-    # answer = redis_conn.hget('quiz', question).decode()
     if answer.rstrip(' .') == update.message.text.rstrip(' .'):
         update.message.reply_text(
             'Правильно! Поздравляю! '

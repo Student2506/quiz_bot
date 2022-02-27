@@ -1,16 +1,16 @@
 import logging
 import os
-import random
-from dotenv import load_dotenv
 from enum import Enum
 from functools import partial
 from pathlib import Path
 
 import redis
+from dotenv import load_dotenv
 from telegram import ReplyKeyboardMarkup
-from telegram.ext import CommandHandler, ConversationHandler, Filters
-from telegram.ext import MessageHandler, RegexHandler, Updater
+from telegram.ext import (CommandHandler, ConversationHandler, Filters,
+                          MessageHandler, RegexHandler, Updater)
 
+from utils import import_quiz_files
 
 logger = logging.getLogger(__name__)
 
@@ -36,23 +36,19 @@ def start(bot, update):
     return Choices.NEW_QUESTION.value
 
 
-def help(bot, update):
-    """Send a message when the command /help is issued."""
-    update.message.reply_text('Help!')
-
-
-def handle_new_question_request(bot, update, redis_conn, quiz):
+def handle_new_question_request(bot, update, redis_conn):
     logger.debug('question-handler\n')
-    pair = random.randint(0, len(quiz))
-    redis_conn.set(update.message.from_user['id'], pair)
-    update.message.reply_text(quiz[pair]['question'])
+    question = redis_conn.hrandfield('quiz').decode()
+    redis_conn.set(update.message.from_user['id'], question)
+    update.message.reply_text(question)
     return Choices.ANSWER.value
 
 
-def handle_solution_attempt(bot, update, redis_conn, quiz):
+def handle_solution_attempt(bot, update, redis_conn):
     logger.debug(f'answer-handler: {update.message.text}\n')
-    pair = int(redis_conn.get(update.message.from_user['id']))
-    if quiz[pair]['answer'].rstrip(' .') == update.message.text:
+    question = redis_conn.get(update.message.from_user['id']).decode()
+    answer = redis_conn.hget('quiz', question).decode()
+    if answer.rstrip(' .') == update.message.text.rstrip(' .'):
         update.message.reply_text(
             'Правильно! Поздравляю! '
             'Для следующего вопроса нажми «Новый вопрос»'
@@ -63,13 +59,13 @@ def handle_solution_attempt(bot, update, redis_conn, quiz):
         return Choices.ANSWER.value
 
 
-def handle_giveup(bot, update, redis_conn, quiz):
+def handle_giveup(bot, update, redis_conn):
     logger.debug('giving up\n')
-    pair = int(redis_conn.getdel(update.message.from_user['id']))
-    update.message.reply_text(quiz[pair]['answer'])
-    pair = random.randint(0, len(quiz))
-    redis_conn.set(update.message.from_user['id'], pair)
-    update.message.reply_text(quiz[pair]['question'])
+    question = redis_conn.getdel(update.message.from_user['id']).decode()
+    update.message.reply_text(redis_conn.hget('quiz', question).decode())
+    question = redis_conn.hrandfield('quiz').decode()
+    redis_conn.set(update.message.from_user['id'], question)
+    update.message.reply_text(question)
     return Choices.ANSWER.value
 
 
@@ -94,37 +90,8 @@ def main():
         username=quiz_redis_user,
         password=quiz_redis_pass
     )
-    quiz_folder = Path('quiz_files')
-    counter = 0
-    question_flag = False
-    answer_flag = False
-    quiz = {}
-    for file in quiz_folder.iterdir():
-        with open(file, encoding='koi8-r') as fh:
-            question = ''
-            answer = ''
-            for line in fh:
-                if 'Вопрос' in line:
-                    question_flag = True
-                    continue
-                if question_flag:
-                    question += line.lstrip(' ')
-                if question.endswith('\n\n'):
-                    question_flag = False
-                if 'Ответ' in line:
-                    answer_flag = True
-                    continue
-                if answer_flag:
-                    answer += line.lstrip(' ')
-                if answer.endswith('\n\n'):
-                    quiz[counter] = {
-                        'question': question.replace('\n', ' ').rstrip(),
-                        'answer': answer.replace('\n', ' ').rstrip()
-                    }
-                    counter += 1
-                    question = ''
-                    answer = ''
-                    answer_flag = False
+
+    import_quiz_files(Path('quiz_files'), redis_conn)
     # telegram bot part
     updater = Updater(quiz_bot_token)
     dp = updater.dispatcher
@@ -137,7 +104,6 @@ def main():
                     partial(
                         handle_new_question_request,
                         redis_conn=redis_conn,
-                        quiz=quiz
                     )
                 ),
             ],
@@ -147,7 +113,6 @@ def main():
                     partial(
                         handle_giveup,
                         redis_conn=redis_conn,
-                        quiz=quiz
                     )
                 ),
                 MessageHandler(
@@ -155,13 +120,12 @@ def main():
                     partial(
                         handle_solution_attempt,
                         redis_conn=redis_conn,
-                        quiz=quiz
                     )
                 ),
 
             ],
         },
-        fallbacks=[CommandHandler('help', help)]
+        fallbacks=[]
     )
     dp.add_handler(conversation_handler)
     dp.add_error_handler(error)

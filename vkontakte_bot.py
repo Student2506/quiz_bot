@@ -1,15 +1,16 @@
 import logging
 import os
-import random
-from dotenv import load_dotenv
 from enum import Enum
 from pathlib import Path
 
 import redis
 import vk_api as vk
+from dotenv import load_dotenv
 from vk_api.keyboard import VkKeyboard
 from vk_api.longpoll import VkEventType, VkLongPoll
 from vk_api.utils import get_random_id
+
+from utils import import_quiz_files
 
 logger = logging.getLogger(__name__)
 
@@ -21,22 +22,23 @@ class Choices(Enum):
     SCORE = 'Мой счёт'
 
 
-def handle_new_question_request(event, vk_api, keyboard, redis_conn, quiz):
+def handle_new_question_request(event, vk_api, keyboard, redis_conn):
     logger.debug('question-handler\n')
-    pair = random.randint(0, len(quiz))
-    redis_conn.set(event.user_id, pair)
+    question = redis_conn.hrandfield('quiz').decode()
+    redis_conn.set(event.user_id, question)
     vk_api.messages.send(
         user_id=event.user_id,
-        message=quiz[pair]['question'],
+        message=question,
         random_id=get_random_id(),
         keyboard=keyboard.get_keyboard()
     )
 
 
-def handle_solution_attempt(event, vk_api, keyboard, redis_conn, quiz):
+def handle_solution_attempt(event, vk_api, keyboard, redis_conn):
     logger.debug(f'answer-handler: {event.text}\n')
-    pair = int(redis_conn.get(event.user_id))
-    if quiz[pair]['answer'].rstrip(' .') == event.text:
+    question = redis_conn.get(event.user_id).decode()
+    answer = redis_conn.hget('quiz', question).decode()
+    if answer.rstrip(' .') == event.text:
         vk_api.messages.send(
             user_id=event.user_id,
             message=(
@@ -55,20 +57,20 @@ def handle_solution_attempt(event, vk_api, keyboard, redis_conn, quiz):
         )
 
 
-def handle_giveup(event, vk_api, keyboard, redis_conn, quiz):
+def handle_giveup(event, vk_api, keyboard, redis_conn):
     logger.debug('giving up\n')
-    pair = int(redis_conn.getdel(event.user_id))
+    question = redis_conn.getdel(event.user_id).decode()
     vk_api.messages.send(
         user_id=event.user_id,
-        message=quiz[pair]['answer'],
+        message=redis_conn.hget('quiz', question).decode(),
         random_id=get_random_id(),
         keyboard=keyboard.get_keyboard()
     )
-    pair = random.randint(0, len(quiz))
-    redis_conn.set(event.user_id, pair)
+    question = redis_conn.hrandfield('quiz').decode()
+    redis_conn.set(event.user_id, question)
     vk_api.messages.send(
         user_id=event.user_id,
-        message=quiz[pair]['question'],
+        message=question,
         random_id=get_random_id(),
         keyboard=keyboard.get_keyboard()
     )
@@ -90,37 +92,7 @@ def main():
         username=quiz_redis_user,
         password=quiz_redis_pass
     )
-    quiz_folder = Path('quiz_files')
-    counter = 0
-    question_flag = False
-    answer_flag = False
-    quiz = {}
-    for file in quiz_folder.iterdir():
-        with open(file, encoding='koi8-r') as fh:
-            question = ''
-            answer = ''
-            for line in fh:
-                if 'Вопрос' in line:
-                    question_flag = True
-                    continue
-                if question_flag:
-                    question += line.lstrip(' ')
-                if question.endswith('\n\n'):
-                    question_flag = False
-                if 'Ответ' in line:
-                    answer_flag = True
-                    continue
-                if answer_flag:
-                    answer += line.lstrip(' ')
-                if answer.endswith('\n\n'):
-                    quiz[counter] = {
-                        'question': question.replace('\n', ' ').rstrip(),
-                        'answer': answer.replace('\n', ' ').rstrip()
-                    }
-                    counter += 1
-                    question = ''
-                    answer = ''
-                    answer_flag = False
+    import_quiz_files(Path('quiz_files'), redis_conn)
     # vk bot part
     vk_session = vk.VkApi(token=quiz_vk_token)
     vk_api = vk_session.get_api()
@@ -135,15 +107,15 @@ def main():
             if event.type == VkEventType.MESSAGE_NEW and event.to_me:
                 if event.text == Choices.NEW_QUESTION.value:
                     handle_new_question_request(
-                        event, vk_api, keyboard, redis_conn, quiz
+                        event, vk_api, keyboard, redis_conn
                     )
                 elif event.text == Choices.GIVEUP.value:
                     handle_giveup(
-                        event, vk_api, keyboard, redis_conn, quiz
+                        event, vk_api, keyboard, redis_conn
                     )
                 else:
                     handle_solution_attempt(
-                        event, vk_api, keyboard, redis_conn, quiz
+                        event, vk_api, keyboard, redis_conn
                     )
     except KeyboardInterrupt:
         pass

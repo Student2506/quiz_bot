@@ -34,7 +34,7 @@
 >  Ответ:
 >   Ты будешь в облаках купаться
 5. Запустить бота  
-> python main.py или python main_vk.py  
+> python telegram_bot.py или python vkontakte_bot.py  
 
 [Пример телеграм бота](https://t.me/quiz_dvmn_student83_bot)  
 [Пример бота ВКонтакте](https://vk.com/public210878612)  

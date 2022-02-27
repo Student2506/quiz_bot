@@ -10,7 +10,7 @@ from vk_api.keyboard import VkKeyboard
 from vk_api.longpoll import VkEventType, VkLongPoll
 from vk_api.utils import get_random_id
 
-from utils import import_quiz_files
+from import_quiz import import_quiz_files
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +24,11 @@ class Choices(Enum):
 
 def handle_new_question_request(event, vk_api, keyboard, redis_conn):
     logger.debug('question-handler\n')
-    question = redis_conn.hrandfield('quiz').decode()
-    redis_conn.set(event.user_id, question)
+    question_answer = redis_conn.hrandfield('quiz', 1, withvalues=True)
+    redis_conn.set(event.user_id, question_answer[1])
     vk_api.messages.send(
         user_id=event.user_id,
-        message=question,
+        message=question_answer[0],
         random_id=get_random_id(),
         keyboard=keyboard.get_keyboard()
     )
@@ -36,8 +36,7 @@ def handle_new_question_request(event, vk_api, keyboard, redis_conn):
 
 def handle_solution_attempt(event, vk_api, keyboard, redis_conn):
     logger.debug(f'answer-handler: {event.text}\n')
-    question = redis_conn.get(event.user_id).decode()
-    answer = redis_conn.hget('quiz', question).decode()
+    answer = redis_conn.get(event.user_id).decode()
     if answer.rstrip(' .') == event.text:
         vk_api.messages.send(
             user_id=event.user_id,
@@ -59,18 +58,18 @@ def handle_solution_attempt(event, vk_api, keyboard, redis_conn):
 
 def handle_giveup(event, vk_api, keyboard, redis_conn):
     logger.debug('giving up\n')
-    question = redis_conn.getdel(event.user_id).decode()
+    answer = redis_conn.getdel(event.user_id)
     vk_api.messages.send(
         user_id=event.user_id,
-        message=redis_conn.hget('quiz', question).decode(),
+        message=answer,
         random_id=get_random_id(),
         keyboard=keyboard.get_keyboard()
     )
-    question = redis_conn.hrandfield('quiz').decode()
-    redis_conn.set(event.user_id, question)
+    question_answer = redis_conn.hrandfield('quiz', 1, withvalues=True)
+    redis_conn.set(event.user_id, question_answer[1])
     vk_api.messages.send(
         user_id=event.user_id,
-        message=question,
+        message=question_answer[0],
         random_id=get_random_id(),
         keyboard=keyboard.get_keyboard()
     )

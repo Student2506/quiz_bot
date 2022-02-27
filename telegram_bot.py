@@ -10,7 +10,7 @@ from telegram import ReplyKeyboardMarkup
 from telegram.ext import (CommandHandler, ConversationHandler, Filters,
                           MessageHandler, RegexHandler, Updater)
 
-from utils import import_quiz_files
+from import_quiz import import_quiz_files
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +38,16 @@ def start(bot, update):
 
 def handle_new_question_request(bot, update, redis_conn):
     logger.debug('question-handler\n')
-    question = redis_conn.hrandfield('quiz').decode()
-    redis_conn.set(update.message.from_user['id'], question)
-    update.message.reply_text(question)
+    question_answer = redis_conn.hrandfield('quiz', 1, withvalues=True)
+    redis_conn.set(update.message.from_user['id'], question_answer[1])
+    update.message.reply_text(question_answer[0].decode())
     return Choices.ANSWER.value
 
 
 def handle_solution_attempt(bot, update, redis_conn):
     logger.debug(f'answer-handler: {update.message.text}\n')
-    question = redis_conn.get(update.message.from_user['id']).decode()
-    answer = redis_conn.hget('quiz', question).decode()
+    answer = redis_conn.get(update.message.from_user['id']).decode()
+    # answer = redis_conn.hget('quiz', question).decode()
     if answer.rstrip(' .') == update.message.text.rstrip(' .'):
         update.message.reply_text(
             'Правильно! Поздравляю! '
@@ -61,11 +61,11 @@ def handle_solution_attempt(bot, update, redis_conn):
 
 def handle_giveup(bot, update, redis_conn):
     logger.debug('giving up\n')
-    question = redis_conn.getdel(update.message.from_user['id']).decode()
-    update.message.reply_text(redis_conn.hget('quiz', question).decode())
-    question = redis_conn.hrandfield('quiz').decode()
-    redis_conn.set(update.message.from_user['id'], question)
-    update.message.reply_text(question)
+    answer = redis_conn.getdel(update.message.from_user['id'])
+    update.message.reply_text(answer.decode())
+    question_answer = redis_conn.hrandfield('quiz', 1, withvalues=True)
+    redis_conn.set(update.message.from_user['id'], question_answer[1])
+    update.message.reply_text(question_answer[0].decode())
     return Choices.ANSWER.value
 
 
